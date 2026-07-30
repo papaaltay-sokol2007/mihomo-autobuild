@@ -154,9 +154,9 @@ jobs:
         cd mihomo-ipk
         tar czf ../control.tar.gz CONTROL
         tar czf ../data.tar.gz opt
-        echo 2.0 > ../debian-binary
-        ar r ../mihomo_${{ matrix.suffix }}_1.19.3_${{ matrix.arch }}.ipk debian-binary control.tar.gz data.tar.gz
         cd ..
+        echo 2.0 > debian-binary
+        ar r mihomo_${{ matrix.suffix }}_1.19.3_${{ matrix.arch }}.ipk debian-binary control.tar.gz data.tar.gz
         
         # Cleanup
         rm -rf mihomo-ipk debian-binary control.tar.gz data.tar.gz
