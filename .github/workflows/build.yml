@@ -1,13 +1,21 @@
 name: Build Mihomo for Keenetic
 
 on:
+  # Build on tag pushes (releases only)
   push:
-    branches: [ main, master ]
     tags:
       - 'v*'
+  
+  # Build on pull requests for testing
   pull_request:
     branches: [ main, master ]
+  
+  # Manual trigger
   workflow_dispatch:
+  
+  # Weekly scheduled build (Sundays at 00:00 UTC) to check for updates
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
   build:
@@ -158,20 +166,21 @@ jobs:
       with:
         name: mihomo-${{ matrix.suffix }}-ipk
         path: mihomo_${{ matrix.suffix }}_1.19.3_${{ matrix.arch }}.ipk
-        retention-days: 30
+        retention-days: 90
 
     - name: Upload binary artifact
       uses: actions/upload-artifact@v4
       with:
         name: mihomo-${{ matrix.suffix }}-binary
         path: /tmp/mihomo/mihomo-${{ matrix.suffix }}
-        retention-days: 30
+        retention-days: 90
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Only create releases on tag pushes, not on scheduled builds
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
     
     steps:
     - name: Download all artifacts
