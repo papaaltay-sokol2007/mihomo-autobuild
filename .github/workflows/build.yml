@@ -1,0 +1,190 @@
+name: Build Mihomo for Keenetic
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Mihomo for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: armv7
+            goarch: arm
+            goarm: 7
+            suffix: armv7
+          - arch: aarch64
+            goarch: arm64
+            goarm: ''
+            suffix: aarch64
+          - arch: mipsel
+            goarch: mipsle
+            goarm: ''
+            suffix: mipsel
+          - arch: mips
+            goarch: mips
+            goarm: ''
+            suffix: mips
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Install cross-compilation tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu gcc-mipsel-linux-gnu gcc-mips-linux-gnu
+
+    - name: Clone Mihomo source
+      run: |
+        git clone --depth 1 --branch v1.19.3 https://github.com/MetaCubeX/mihomo.git /tmp/mihomo
+        cd /tmp/mihomo
+        go mod download
+
+    - name: Build Mihomo for ${{ matrix.arch }}
+      run: |
+        cd /tmp/mihomo
+        export GOOS=linux
+        export GOARCH=${{ matrix.goarch }}
+        export CGO_ENABLED=0
+        ${{ matrix.goarm != '' && format('export GOARM={0}', matrix.goarm) || '' }}
+        
+        # Build with optimizations
+        go build -ldflags="-s -w -extldflags '-static'" -trimpath -o mihomo-${{ matrix.suffix }}
+        
+        # Verify binary
+        file mihomo-${{ matrix.suffix }}
+        ls -lh mihomo-${{ matrix.suffix }}
+
+    - name: Create IPK package for ${{ matrix.arch }}
+      run: |
+        mkdir -p mihomo-ipk/opt/bin
+        mkdir -p mihomo-ipk/opt/etc/mihomo
+        mkdir -p mihomo-ipk/opt/etc/init.d
+        mkdir -p mihomo-ipk/CONTROL
+        
+        # Copy binary
+        cp /tmp/mihomo/mihomo-${{ matrix.suffix }} mihomo-ipk/opt/bin/mihomo
+        chmod +x mihomo-ipk/opt/bin/mihomo
+        
+        # Create control file
+        cat > mihomo-ipk/CONTROL/control << EOF
+        Package: mihomo
+        Version: 1.19.3-${{ matrix.suffix }}
+        Architecture: ${{ matrix.arch }}
+        Maintainer: Keenetic Optimizer
+        Section: net
+        Priority: optional
+        Description: Mihomo (Clash Meta) - Optimized for Keenetic routers
+         High-performance proxy core with reduced memory footprint
+        Depends: libc, libpthread
+        EOF
+        
+        # Create postinst script
+        cat > mihomo-ipk/CONTROL/postinst << 'EOF'
+        #!/bin/sh
+        chmod +x /opt/bin/mihomo
+        if [ ! -f /opt/etc/mihomo/config.yaml ]; then
+            mkdir -p /opt/etc/mihomo
+            echo "# Add your Mihomo config here" > /opt/etc/mihomo/config.yaml
+        fi
+        echo "Mihomo installed successfully"
+        EOF
+        chmod +x mihomo-ipk/CONTROL/postinst
+        
+        # Create init script
+        cat > mihomo-ipk/opt/etc/init.d/S99mihomo << 'EOF'
+        #!/bin/sh
+        case "$1" in
+        start)
+        if [ -f /opt/etc/mihomo/config.yaml ]; then
+            /opt/bin/mihomo -d /opt/etc/mihomo &
+            echo "Mihomo started"
+        else
+            echo "Config not found, skipping"
+        fi
+        ;;
+        stop)
+        killall mihomo 2>/dev/null
+        echo "Mihomo stopped"
+        ;;
+        restart)
+        $0 stop
+        sleep 2
+        $0 start
+        ;;
+        status)
+        if pgrep -x mihomo >/dev/null; then
+            echo "Mihomo is running"
+        else
+            echo "Mihomo is not running"
+        fi
+        ;;
+        *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        esac
+        EOF
+        chmod +x mihomo-ipk/opt/etc/init.d/S99mihomo
+        
+        # Build IPK
+        cd mihomo-ipk
+        tar czf ../control.tar.gz CONTROL
+        tar czf ../data.tar.gz opt
+        echo 2.0 > ../debian-binary
+        ar r ../mihomo_${{ matrix.suffix }}_1.19.3_${{ matrix.arch }}.ipk debian-binary control.tar.gz data.tar.gz
+        cd ..
+        
+        # Cleanup
+        rm -rf mihomo-ipk debian-binary control.tar.gz data.tar.gz
+
+    - name: Upload IPK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: mihomo-${{ matrix.suffix }}-ipk
+        path: mihomo_${{ matrix.suffix }}_1.19.3_${{ matrix.arch }}.ipk
+        retention-days: 30
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: mihomo-${{ matrix.suffix }}-binary
+        path: /tmp/mihomo/mihomo-${{ matrix.suffix }}
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/**/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

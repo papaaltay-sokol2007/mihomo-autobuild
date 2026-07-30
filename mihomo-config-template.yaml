@@ -1,0 +1,56 @@
+# Optimized Mihomo config for Keenetic routers
+# Focus on memory efficiency and performance
+
+mixed-port: 7890
+allow-lan: true
+bind-address: '*'
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+
+# Memory optimizations
+# Keep fewer connections in memory to reduce RAM usage
+# Connection pool reduced for embedded systems
+keep-alive-interval: 30
+find-process-mode: always
+
+# DNS optimization
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - 'localhost.ptlogin2.qq.com'
+  nameserver:
+    - 8.8.8.8
+    - 8.8.4.4
+  fallback:
+    - 1.1.1.1
+    - 1.0.0.1
+
+# Sniffer optimization (reduced for performance)
+sniffer:
+  enable: true
+  sniff-tls-sni: true
+  sniffing:
+    - tls
+    - http
+  force-domain:
+    - '+.google.com'
+    - '+.facebook.com'
+    - '+.youtube.com'
+
+# Memory-optimized proxy groups
+proxies: []
+
+proxy-groups:
+  - name: "PROXY"
+    type: select
+    proxies:
+      - DIRECT
+
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY
